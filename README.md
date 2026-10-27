@@ -2,7 +2,7 @@
 
 A process owner maps a workflow, resolves anchored AI findings, and freezes a specification. An engineer approves Code, Agent or Human methods, generates inspectable step modules, evaluates them against locked expectations, and starts bounded repair. The import-receiving example reads existing Gmail documents and previews a shipment report; its business rules are supplied to generated code, not hardcoded into the platform.
 
-This repository implements the [Meridian take-home assignment](https://app.notion.com/p/Meridian-Take-Home-Project-3adfdc07926d80dc9b59f9ce64e07155). Start with **[setup](app/README.md#run-locally)**, then the **[end-to-end walkthrough](docs/guides/demo.md)**. The [documentation index](docs/README.md) links the PRDs, diagrams, feature contracts and schema rationale.
+This repository implements [Meridian](https://app.notion.com/p/Meridian-Take-Home-Project-3adfdc07926d80dc9b59f9ce64e07155). Start with **[setup](app/README.md#run-locally)**, then the **[end-to-end walkthrough](docs/guides/demo.md)**. The [documentation index](docs/README.md) links the PRDs, diagrams, feature contracts and schema rationale.
 
 ## Run
 
