@@ -1,3 +1,4 @@
+import { Tracer } from "judgeval";
 import {
   EXTRACTION_BATCH_POLICY,
   validateExtractionSchema,
@@ -37,6 +38,17 @@ export interface StepAdapters {
   ): Promise<Json>;
 }
 export async function invokeApprovedStep(
+  ...args: Parameters<typeof invokeApprovedStepInternal>
+) {
+  return Tracer.observe(async () => {
+    const [project, nodeId, method, context] = args;
+    Tracer.setInput({ node_id: nodeId, method, context });
+    Tracer.setAttribute("meridian.workflow_id", project.workflow_id);
+    return invokeApprovedStepInternal(...args);
+  }, { spanType: "agent", spanName: "approved_workflow_step", recordInput: false })();
+}
+
+async function invokeApprovedStepInternal(
   project: Project,
   nodeId: string,
   method: Method,
@@ -46,6 +58,10 @@ export async function invokeApprovedStep(
   readDocuments?: (ids: string[]) => Promise<ReasoningDocument[]>,
   audit?: RecordAudit,
 ) {
+  const invoke = Tracer.observe(
+    (input: Record<string, Json>) => adapters.invoke(project, nodeId, input, signal),
+    { spanType: "tool", spanName: "execute_approved_module" },
+  );
   let batchIndex: number | undefined;
   let providerTrace: ProviderTrace | undefined;
   const saveProviderTrace = (trace: ProviderTrace) => { providerTrace = trace; };
@@ -57,7 +73,7 @@ export async function invokeApprovedStep(
         "HUMAN_RESPONSE_REQUIRED",
         "This step requires a fresh human response or verified scripted response.",
       );
-    const initial = await adapters.invoke(project, nodeId, context, signal);
+    const initial = await invoke(context);
     signal.throwIfAborted();
     await audit?.("initial_output", initial);
     let result = stepResult.parse(initial);
@@ -93,15 +109,12 @@ export async function invokeApprovedStep(
         tool_result = value.tool_result;
         evidence = value.envelope?.fields;
       }
-      const processed = await adapters.invoke(
-        project,
-        nodeId,
+      const processed = await invoke(
         {
           ...context,
           tool_result,
           ...(evidence ? { extraction_evidence: evidence } : {}),
         },
-        signal,
       );
       signal.throwIfAborted();
       await audit?.("final_output", processed);

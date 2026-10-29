@@ -9,7 +9,10 @@ import {
   RUNTIME_HEARTBEAT_POLICY,
   WORKER_ACTIVITY_CONCURRENCY,
 } from "../domain/runtime-policy";
+import { initializeJudgment } from "../server/integrations/judgment";
+import { Tracer } from "judgeval";
 nextEnv.loadEnvConfig(process.cwd());
+await initializeJudgment();
 const db = await getDatabase();
 const config = temporalConfig();
 let connection: NativeConnection | undefined;
@@ -32,6 +35,11 @@ try {
     stopOutbox();
   }
 } finally {
+  try {
+    await Tracer.shutdown();
+  } catch {
+    console.warn("Judgment exporter could not finish during worker shutdown.");
+  }
   await connection?.close();
   await db.close();
 }

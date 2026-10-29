@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "judgment": {
+      "source": "JudgmentLabs/skills",
+      "sourceType": "github",
+      "skillPath": "skills/judgment/SKILL.md",
+      "computedHash": "142fb012671307c94e50d1ebc42bbc9eeff8b3d194ae43bc733a0a4442e3ff07"
+    }
+  }
+}

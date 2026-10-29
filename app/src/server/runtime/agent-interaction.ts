@@ -1,3 +1,4 @@
+import { Tracer } from "judgeval";
 import { captureInferenceTrace } from "../integrations/inference-trace";
 import type { ProviderTrace } from "../../domain/execution-audit";
 import { createHash } from "node:crypto";
@@ -25,7 +26,14 @@ export async function agentInteraction(
       "No captured document reader is available.",
     );
   const documents = readDocuments
-    ? await readDocuments(request.document_ids)
+    ? await Tracer.observe(async (ids: string[]) => {
+        const docs = await readDocuments(ids);
+        Tracer.setOutput(docs.map(doc => ({
+          artifact_id: doc.artifact_id, name: doc.name, media_type: doc.media_type,
+          byte_size: doc.bytes.length, sha256: createHash("sha256").update(doc.bytes).digest("hex"),
+        })));
+        return docs;
+      }, { spanType: "tool", spanName: "read_captured_documents", recordOutput: false })(request.document_ids)
     : [];
   signal.throwIfAborted();
   const sourcePages =
@@ -71,13 +79,11 @@ export async function agentInteraction(
   let providerTrace: ProviderTrace | undefined;
   const raw = await captureInferenceTrace(async () =>
     request.kind === "extract"
-      ? await adapters.extract!(request, documents, signal)
-      : await adapters.reason(
-          request.instructions,
-          request.data,
-          signal,
-          documents,
-        ), trace => { providerTrace = trace; saveProviderTrace?.(trace); });
+      ? await Tracer.observe((input: typeof request) => adapters.extract!(input, documents, signal),
+          { spanType: "tool", spanName: "extract_document_evidence" })(request)
+      : await Tracer.observe((instructions: string, data: typeof request.data) =>
+          adapters.reason(instructions, data, signal, documents),
+          { spanType: "tool", spanName: "interpret_documents" })(request.instructions, request.data), trace => { providerTrace = trace; saveProviderTrace?.(trace); });
   signal.throwIfAborted();
   await audit?.("model_response", raw, { ...(batchIndex === undefined ? {} : { batch_index: batchIndex }), ...(providerTrace ? { provider_trace: providerTrace } : {}) });
   const envelope =

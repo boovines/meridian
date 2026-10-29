@@ -164,6 +164,70 @@ For Vercel Sandbox development, link the dedicated project with Vercel CLI and o
 
 ## Runtime verification
 
+### Judgment tracing
+
+The optional `judgeval` integration targets the existing **invoice agent** project
+`5d2a6103-17c6-491a-96e7-4017dcb95bf1` in organization
+`bd6bb705-d647-45c9-ba5f-11e18ffe40fc`. Set `JUDGMENT_API_KEY` to an organization
+ingest key beginning with `jli_`, set `JUDGMENT_ORG_ID`, and choose
+`JUDGMENT_ENVIRONMENT` in ignored `app/.env.local` or the process environment.
+MCP OAuth is separate and does not supply the SDK key. The repo-local Judgment
+skill is in `.agents/skills/judgment`, installed from `JudgmentLabs/skills`.
+
+`src/server/integrations/judgment.ts` initializes once per process and registers
+the AI SDK 7 OpenTelemetry integration. Next's Node instrumentation hook and the
+Temporal worker call it after environment loading. Missing credentials disable
+tracing; configuration failures warn without changing business results. Restart
+the app/worker after changing tracing credentials. The worker flushes on shutdown;
+standalone scripts must initialize before creating observed functions and flush
+after the root finishes. The document interpreter uses a single observed LLM
+operation with structured messages and returned token metadata. Its
+AI SDK telemetry is disabled to avoid duplicate spans and an observed timestamp
+containment failure in the SDK's event-based span tree. Other AI SDK calls retain
+the registered integration. Binary documents are represented by artifact/name
+references in document-model inputs rather than copied into trace attributes.
+
+Approved runtime steps record separate agent, sandbox-invocation, captured-document
+read, reasoning, and extraction spans. The Gmail adapter records search, message, attachment and draft calls. Manual inputs omit credentials, callbacks, generated source
+and binary document bytes; attachment outputs record metadata. Model telemetry
+can contain the supplied prompts and documents, so use only permitted data with
+the configured project. Existing execution audit remains authoritative.
+
+```sh
+npm run judgment:onboarding                         # local mocks, no export
+npm run judgment:onboarding -- --export --cases=complete-packet
+```
+
+The export command sends synthetic onboarding telemetry to Judgment. Check the
+project's existing distinct trace count first, then choose only missing cases or
+focused verification cases with `--cases=id1,id2`. The ten named scenarios are in
+`tests/fixtures/judgment-onboarding.ts`. They run the real graph engine, step
+contract, PDF evidence validation, Gmail adapter, OpenAI adapter and AI SDK, with
+mocked external Gmail, sandbox and model responses. No generated source executes,
+no application database is changed, and no live mailbox or model is called. The
+human-review case exercises draft creation through a mocked Composio transport;
+it creates no real draft. The multiple-batches case exercises two bounded
+`extract_batch` interactions.
+The mocks explicitly record zero inference cost and zero token use; these are
+not estimates of production usage. Every span inherits `onboarding.synthetic`,
+`onboarding.source`, `onboarding.batch_id` and `onboarding.scenario` attributes.
+
+The cases cover complete/missing evidence, ambiguous names and shipment identity,
+duplicate attachments, a certificate reply, multiple batches, Unicode/whitespace,
+parallel branches and scripted human review. These verify instrumentation and
+host execution, not the quality of generated invoice-matching code or a model.
+Live infrastructure failures, durable Temporal retries, grouped-capture
+orchestration, scoping, engineering, review and repair agent flows need separate
+verification; this onboarding batch covers invoice execution and Gmail tools. Each production activity is its own trace;
+this change does not propagate one trace across the full durable workflow.
+
+Use Judgment MCP to inspect distinct root traces, meaningful inputs/outputs,
+synthetic attributes and span nesting, then `get_trace_health_summary`,
+`get_trace_health` and `list_trace_health_failures`. Health is sampled: missing or
+not-evaluated results are not passes. Historical failures remain visible after
+fixes; report the corrected sample window separately. Do not use onboarding data
+as a held-out accuracy benchmark or manually create judges for this setup.
+
 The [runtime guide](../docs/features/workflow-runtime.md) explains routing, human waits, limits, history and live recovery verification. Agent → Run workflow offers Selected emails for automatic grouped execution and Saved input for manual runs. The grouped inspector shows actual run/code provenance, clarification, human decisions, recovery history and partial reports. Generated code only executes inside Vercel Sandbox. The worker owns all scheduling, and SQL records progress without a second scheduler.
 
 ## Evaluation verification
