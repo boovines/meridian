@@ -1,5 +1,19 @@
 # Workflow execution
 
+When an operator enables Judgment, execution also produces diagnostic traces in
+the configured project. A trace exposes step requests and results, document reads,
+model interactions and Gmail retrieval calls. Tracing does not change approvals,
+matching rules, human responses or the existing execution audit. Each durable
+step is recorded separately; the whole multi-worker run is not presented as one
+continuous trace. Tracing configuration problems produce a warning while the
+workflow continues normally.
+
+Synthetic onboarding examples are visibly marked and use mocked external
+services. They demonstrate trace coverage, not invoice accuracy. Health checks
+describe sampled instrumentation, not agent correctness; an unevaluated trace is
+not a passing trace. See the [operator setup](../../app/README.md#judgment-tracing)
+for configuration and verification commands.
+
 The trusted runtime runs the frozen graph against one immutable input bundle and code version. Its API creates a durable operation, exposes ordered step history, accepts a human response, and permits cancellation. Open Agent → Run workflow in the engineer workspace. Select an implementation and saved input packet, or capture related Gmail emails. Start run begins execution; the input controls remain disabled while another workflow operation is active.
 
 Temporal owns scheduling, parallel joins, active-time timers, and human waits. Postgres stores application progress and history. Each visit has a scheduling key and per-node visit number; a retry within that visit uses a fresh fencing token. Completed outputs are reused on duplicate delivery. An obsolete invocation cannot overwrite a completed, cancelled, or superseded attempt.

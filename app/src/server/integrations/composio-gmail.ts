@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Tracer } from "judgeval";
 import { DomainError } from "../../domain/errors";
 import type {
   GmailMessage,
@@ -161,10 +162,11 @@ export class ComposioGmail implements GmailReader {
       );
     return result.data;
   }
-  async createDraft(
+  createDraft = Tracer.observe(async (
     input: { subject: string; body: string; recipient: string },
     signal: AbortSignal,
-  ) {
+  ) => {
+    Tracer.setInput(input);
     const result = z
       .object({ id: z.string().min(1) })
       .parse(
@@ -180,83 +182,106 @@ export class ComposioGmail implements GmailReader {
         ),
       );
     return result.id;
-  }
-  async search(
-    query: string,
-    pageToken: string | undefined,
-    signal: AbortSignal,
-  ) {
-    const result = z
-      .object({
-        messages: z.array(rawMessage),
-        nextPageToken: z.string().nullish(),
-      })
-      .parse(
+  }, { spanType: "tool", spanName: "gmail_create_draft", recordInput: false });
+  search = Tracer.observe(
+    async (
+      query: string,
+      pageToken: string | undefined,
+      signal: AbortSignal,
+    ) => {
+      Tracer.setInput({ query, page_token: pageToken ?? null });
+      const result = z
+        .object({
+          messages: z.array(rawMessage),
+          nextPageToken: z.string().nullish(),
+        })
+        .parse(
+          await this.execute(
+            "GMAIL_FETCH_EMAILS",
+            {
+              query,
+              max_results: 25,
+              verbose: false,
+              include_payload: false,
+              ...(pageToken ? { page_token: pageToken } : {}),
+            },
+            signal,
+          ),
+        );
+      return {
+        messages: result.messages.map(summary),
+        next_page_token: result.nextPageToken || null,
+      };
+    },
+    { spanType: "tool", spanName: "gmail_search", recordInput: false },
+  );
+  message = Tracer.observe(
+    async (id: string, signal: AbortSignal): Promise<GmailMessage> => {
+      Tracer.setInput({ message_id: id });
+      const m = rawMessage.parse(
         await this.execute(
-          "GMAIL_FETCH_EMAILS",
+          "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID",
+          { message_id: id, format: "full" },
+          signal,
+        ),
+      );
+      if (m.messageId !== id)
+        throw new DomainError(
+          502,
+          "GMAIL_MESSAGE_CHANGED",
+          "Gmail returned a different message than requested.",
+        );
+      return {
+        ...summary(m),
+        text: m.messageText,
+        attachments: m.attachmentList.map((a) => ({
+          id: a.attachmentId,
+          name: a.filename,
+          media_type: a.mimeType,
+        })),
+      };
+    },
+    { spanType: "tool", spanName: "gmail_read_message", recordInput: false },
+  );
+  attachment = Tracer.observe(
+    async (
+      messageId: string,
+      attachment: GmailMessage["attachments"][number],
+      signal: AbortSignal,
+    ) => {
+      Tracer.setInput({ message_id: messageId, attachment });
+      const result = z.object({ file: z.object({ s3url: z.string() }) }).parse(
+        await this.execute(
+          "GMAIL_GET_ATTACHMENT",
           {
-            query,
-            max_results: 25,
-            verbose: false,
-            include_payload: false,
-            ...(pageToken ? { page_token: pageToken } : {}),
+            message_id: messageId,
+            attachment_id: attachment.id,
+            file_name: attachment.name,
           },
           signal,
         ),
       );
-    return {
-      messages: result.messages.map(summary),
-      next_page_token: result.nextPageToken || null,
-    };
-  }
-  async message(id: string, signal: AbortSignal): Promise<GmailMessage> {
-    const m = rawMessage.parse(
-      await this.execute(
-        "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID",
-        { message_id: id, format: "full" },
-        signal,
-      ),
-    );
-    if (m.messageId !== id)
-      throw new DomainError(
-        502,
-        "GMAIL_MESSAGE_CHANGED",
-        "Gmail returned a different message than requested.",
+      const bytes = await boundedBytes(
+        await this.request(attachmentUrl(result.file.s3url), {
+          signal,
+          redirect: "error",
+        }),
+        25 * 1024 * 1024,
       );
-    return {
-      ...summary(m),
-      text: m.messageText,
-      attachments: m.attachmentList.map((a) => ({
-        id: a.attachmentId,
-        name: a.filename,
-        media_type: a.mimeType,
-      })),
-    };
-  }
-  async attachment(
-    messageId: string,
-    attachment: GmailMessage["attachments"][number],
-    signal: AbortSignal,
-  ) {
-    const result = z.object({ file: z.object({ s3url: z.string() }) }).parse(
-      await this.execute(
-        "GMAIL_GET_ATTACHMENT",
-        {
-          message_id: messageId,
-          attachment_id: attachment.id,
-          file_name: attachment.name,
-        },
-        signal,
-      ),
-    );
-    return boundedBytes(
-      await this.request(attachmentUrl(result.file.s3url), {
-        signal,
-        redirect: "error",
-      }),
-      25 * 1024 * 1024,
-    );
-  }
+      Tracer.setOutput({
+        name: attachment.name,
+        media_type: attachment.media_type,
+        byte_size: bytes.length,
+      });
+      return bytes;
+    },
+    {
+      spanType: "tool",
+      spanName: "gmail_read_attachment",
+      recordInput: false,
+      recordOutput: false,
+    },
+  );
 }
 export function gmailReader(): GmailReader {
   const key = process.env.COMPOSIO_API_KEY,

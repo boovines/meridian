@@ -1,3 +1,4 @@
+import { Tracer } from "judgeval";
 import { RUNTIME_DEADLINE_POLICY } from "../../domain/runtime-policy";
 import {
   extractionInstructions,
@@ -61,8 +62,16 @@ export async function reasonForStep(
   }
   try {
     return (await modelOutput(
-      () =>
-        generateText({
+      () => Tracer.observe(async () => {
+        Tracer.setInput([
+          { role: "system", content: responseContract ? `${configuration.system}\n${responseContract}` : configuration.system },
+          { role: "user", content: content.map(part => part.type === "text" ? part : {
+            type: "text", text: "[Captured binary document omitted from telemetry; see the preceding artifact ID and filename.]",
+          }) },
+        ]);
+        // One model span avoids duplicate AI SDK events outside the awaited tool interval.
+        const result = await generateText({
+          telemetry: { isEnabled: false },
           model: runtimeOpenAI(configuration.name),
           output: extractionSchema ? extractionOutput(extractionSchema) : Output.json(),
           system: responseContract ? `${configuration.system}\n${responseContract}` : configuration.system,
@@ -76,7 +85,18 @@ export async function reasonForStep(
               store: false,
             },
           },
-        }),
+        });
+        Tracer.recordLLMMetadata({
+          provider: "openai",
+          model: result.response.modelId,
+          non_cached_input_tokens: result.totalUsage.inputTokenDetails.noCacheTokens,
+          cache_read_input_tokens: result.totalUsage.inputTokenDetails.cacheReadTokens,
+          cache_creation_input_tokens: result.totalUsage.inputTokenDetails.cacheWriteTokens,
+          output_tokens: result.totalUsage.outputTokens,
+        });
+        Tracer.setOutput([{ role: "assistant", content: result.text }]);
+        return result;
+      }, { spanType: "llm", spanName: "interpret_document_model", recordInput: false, recordOutput: false })(),
       "Document interpretation",
     )) as Json;
   } catch (error) {
