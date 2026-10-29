@@ -88,13 +88,14 @@ export async function reasonForStep(
         });
         Tracer.recordLLMMetadata({
           provider: "openai",
-          model: result.response.modelId,
-          non_cached_input_tokens: result.totalUsage.inputTokenDetails.noCacheTokens,
-          cache_read_input_tokens: result.totalUsage.inputTokenDetails.cacheReadTokens,
-          cache_creation_input_tokens: result.totalUsage.inputTokenDetails.cacheWriteTokens,
-          output_tokens: result.totalUsage.outputTokens,
+          model: result.response?.modelId ?? configuration.name,
+          non_cached_input_tokens: result.totalUsage?.inputTokenDetails?.noCacheTokens,
+          cache_read_input_tokens: result.totalUsage?.inputTokenDetails?.cacheReadTokens,
+          cache_creation_input_tokens: result.totalUsage?.inputTokenDetails?.cacheWriteTokens,
+          output_tokens: result.totalUsage?.outputTokens,
         });
-        Tracer.setOutput([{ role: "assistant", content: result.text }]);
+        if (typeof result.text === "string")
+          Tracer.setOutput([{ role: "assistant", content: result.text }]);
         return result;
       }, { spanType: "llm", spanName: "interpret_document_model", recordInput: false, recordOutput: false })(),
       "Document interpretation",
